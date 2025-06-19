@@ -553,7 +553,6 @@ def create_dicom_mcp_server(config_path: str, name: str = "DICOM MCP") -> FastMC
         
         return result
 
-
     @mcp.tool()
     def get_attribute_presets() -> Dict[str, Dict[str, List[str]]]:
         """Get all available attribute presets for DICOM queries.
@@ -583,5 +582,78 @@ def create_dicom_mcp_server(config_path: str, name: str = "DICOM MCP") -> FastMC
             }
         """
         return ATTRIBUTE_PRESETS
+    
+    @mcp.tool()
+    def retrieve_dicom_instances(
+        series_instance_uid: str,
+        output_directory: str = None,
+        sop_instance_uid: str = None,
+        study_instance_uid: str = None,
+        ctx: Context = None
+    ) -> Dict[str, Any]:
+        """Retrieve DICOM instances from the server and save them to a local directory.
+        
+        This tool uses C-GET to download DICOM instances from the current DICOM server
+        to a local directory. You can retrieve an entire series or specific instances
+        within a series. This is useful for downloading DICOM files for local analysis,
+        processing, or archival purposes.
+        
+        Files are saved with meaningful names based on DICOM metadata:
+        Format: PatientID_PatientName_StudyDate_Modality_SeriesDescription_InstXXX.dcm
+        Example: "12345_SMITH_20230215_CT_CHEST_AXIAL_Inst001.dcm"
+        
+        Args:
+            series_instance_uid: Unique identifier for the series to retrieve (required)
+            output_directory: Local directory path to save the DICOM files (optional, creates temp dir if not provided)
+            sop_instance_uid: Specific SOP Instance UID to retrieve (optional, retrieves all series instances if not provided)
+            study_instance_uid: Study Instance UID for organizational purposes (optional)
+        
+        Returns:
+            Dictionary containing:
+            - success: Boolean indicating if the operation was successful
+            - message: Description of the operation result or error
+            - output_directory: Path to the directory where files were saved
+            - files_retrieved: List of file paths that were downloaded
+            - total_files: Number of files retrieved
+            - total_size_mb: Total size of retrieved files in megabytes
+            - file_details: Detailed information about each retrieved file (if successful)
+        
+        Example:
+            {
+                "success": true,
+                "message": "Successfully retrieved 120 DICOM files (45.67 MB)",
+                "output_directory": "/tmp/dicom_retrieve_xyz123",
+                "files_retrieved": ["/tmp/dicom_retrieve_xyz123/1.2.3.4.5.6.7.8.dcm", ...],
+                "total_files": 120,
+                "total_size_mb": 45.67,
+                "file_details": [
+                    {
+                        "file_path": "/tmp/dicom_retrieve_xyz123/1.2.3.4.5.6.7.8.dcm",
+                        "sop_instance_uid": "1.2.3.4.5.6.7.8",
+                        "size_bytes": 512000
+                    }
+                ]
+            }
+        """
+        dicom_ctx = ctx.request_context.lifespan_context
+        client = dicom_ctx.client
+        
+        try:
+            result = client.retrieve_dicom_instances(
+                series_instance_uid=series_instance_uid,
+                output_directory=output_directory,
+                sop_instance_uid=sop_instance_uid,
+                study_instance_uid=study_instance_uid
+            )
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error retrieving DICOM instances: {str(e)}",
+                "output_directory": output_directory or "",
+                "files_retrieved": [],
+                "total_files": 0,
+                "total_size_mb": 0.0
+            }
     
     return mcp

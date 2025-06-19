@@ -1,7 +1,10 @@
 [project]
 name = "dicom-mcp"
 version = "0.1.1"
-description = "Add your description here"
+description = "DICOM MCP Server for Medical Imaging Systems"
+authors = [
+    {name = "kain", email = "yinkain694@gmail.com"}
+]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,7 +21,11 @@ dev = [
     "requests>=2.31.0",
     "pydicom>=2.4.0",
     "pytest-cov>=6.0.0",
-    "reportlab"
+    "reportlab",
+    "nibabel>=5.0.0",
+    "numpy>=1.24.0"
 ]
+
 [project.scripts]
 dicom-mcp = "dicom_mcp.__main__:main"
+nii-to-dicom = "dicom_mcp.nii_converter:main"

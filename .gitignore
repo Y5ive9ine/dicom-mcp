@@ -12,3 +12,7 @@ todo
 
 # Editors
 .vscode
+
+# Data and output directories
+dataset/
+json_output/

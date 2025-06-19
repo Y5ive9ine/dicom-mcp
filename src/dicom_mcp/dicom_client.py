@@ -635,6 +635,266 @@ class DicomClient:
             "file_path": received_files[0] if received_files else ""
         }
     
+    def retrieve_dicom_instances(
+            self,
+            series_instance_uid: str,
+            output_directory: str = None,
+            sop_instance_uid: str = None,
+            study_instance_uid: str = None
+        ) -> Dict[str, Any]:
+        """Retrieve DICOM instances from the server and save them to a local directory.
+        
+        This method uses C-GET to download DICOM instances from the server to a local
+        directory. You can retrieve an entire series or specific instances within a series.
+        
+        Files are saved with meaningful names based on DICOM metadata:
+        Format: PatientID_PatientName_StudyDate_Modality_SeriesDescription_InstXXX.dcm
+        Example: "12345_SMITH_20230215_CT_CHEST_AXIAL_Inst001.dcm"
+        
+        Args:
+            series_instance_uid: Series Instance UID to retrieve (required)
+            output_directory: Local directory to save the DICOM files (optional, uses temp dir if not provided)
+            sop_instance_uid: Specific SOP Instance UID to retrieve (optional, retrieves all if not provided)
+            study_instance_uid: Study Instance UID (optional, helps with organization)
+            
+        Returns:
+            Dictionary with operation status and details:
+            {
+                "success": bool,
+                "message": str,
+                "output_directory": str,
+                "files_retrieved": list,  # List of retrieved file paths
+                "total_files": int,
+                "total_size_mb": float
+            }
+        """
+        # Create output directory if not provided
+        if output_directory is None:
+            output_directory = tempfile.mkdtemp(prefix="dicom_retrieve_")
+        else:
+            os.makedirs(output_directory, exist_ok=True)
+        
+        # Create dataset for C-GET query
+        ds = Dataset()
+        if sop_instance_uid:
+            # Retrieve specific instance
+            ds.QueryRetrieveLevel = "IMAGE"
+            ds.SeriesInstanceUID = series_instance_uid
+            ds.SOPInstanceUID = sop_instance_uid
+            if study_instance_uid:
+                ds.StudyInstanceUID = study_instance_uid
+        else:
+            # Retrieve entire series
+            ds.QueryRetrieveLevel = "SERIES"
+            ds.SeriesInstanceUID = series_instance_uid
+            if study_instance_uid:
+                ds.StudyInstanceUID = study_instance_uid
+        
+        # Track retrieved files
+        retrieved_files = []
+        total_size_bytes = 0
+        
+        def handle_store(event):
+            """Handle C-STORE operations during C-GET"""
+            dataset = event.dataset
+            sop_instance = dataset.SOPInstanceUID if hasattr(dataset, 'SOPInstanceUID') else "unknown"
+            
+            # Ensure we have proper file meta information
+            if not hasattr(dataset, 'file_meta') or not hasattr(dataset.file_meta, 'TransferSyntaxUID'):
+                from pydicom.dataset import FileMetaDataset
+                if not hasattr(dataset, 'file_meta'):
+                    dataset.file_meta = FileMetaDataset()
+                
+                if event.context.transfer_syntax:
+                    dataset.file_meta.TransferSyntaxUID = event.context.transfer_syntax
+                else:
+                    dataset.file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"  # Implicit VR Little Endian
+                
+                if not hasattr(dataset.file_meta, 'MediaStorageSOPClassUID') and hasattr(dataset, 'SOPClassUID'):
+                    dataset.file_meta.MediaStorageSOPClassUID = dataset.SOPClassUID
+                
+                if not hasattr(dataset.file_meta, 'MediaStorageSOPInstanceUID') and hasattr(dataset, 'SOPInstanceUID'):
+                    dataset.file_meta.MediaStorageSOPInstanceUID = dataset.SOPInstanceUID
+            
+            def clean_filename(text, max_length=50):
+                """Clean text for use in filename"""
+                if not text:
+                    return "unknown"
+                # Remove or replace invalid filename characters
+                import re
+                text = str(text).strip()
+                text = re.sub(r'[<>:"/\\|?*\[\]]', '_', text)  # Replace invalid chars
+                text = re.sub(r'\s+', '_', text)  # Replace spaces with underscores
+                text = re.sub(r'_+', '_', text)  # Replace multiple underscores with single
+                text = text.strip('_')  # Remove leading/trailing underscores
+                return text[:max_length] if len(text) > max_length else text
+            
+            # Extract meaningful information for filename
+            patient_id = clean_filename(getattr(dataset, 'PatientID', ''), 15)
+            patient_name = clean_filename(str(getattr(dataset, 'PatientName', '')).split('^')[0], 15) if hasattr(dataset, 'PatientName') else ''
+            study_date = clean_filename(getattr(dataset, 'StudyDate', ''), 8)
+            series_number = clean_filename(getattr(dataset, 'SeriesNumber', ''), 5)
+            series_description = clean_filename(getattr(dataset, 'SeriesDescription', ''), 20)
+            modality = clean_filename(getattr(dataset, 'Modality', ''), 5)
+            instance_number = clean_filename(getattr(dataset, 'InstanceNumber', ''), 5)
+            
+            # Build filename components
+            filename_parts = []
+            
+            # Add patient info
+            if patient_id and patient_id != 'unknown':
+                filename_parts.append(patient_id)
+            if patient_name and patient_name != 'unknown':
+                filename_parts.append(patient_name)
+            
+            # Add study date
+            if study_date and study_date != 'unknown':
+                filename_parts.append(study_date)
+            
+            # Add series info
+            if modality and modality != 'unknown':
+                filename_parts.append(modality)
+            if series_description and series_description != 'unknown':
+                filename_parts.append(series_description)
+            elif series_number and series_number != 'unknown':
+                filename_parts.append(f"Series{series_number}")
+            
+            # Add instance number
+            if instance_number and instance_number != 'unknown':
+                filename_parts.append(f"Inst{instance_number}")
+            
+            # If we couldn't extract meaningful info, fall back to SOP Instance UID
+            if not filename_parts:
+                filename_parts.append(sop_instance[:20])  # Use first 20 chars of SOP Instance UID
+            
+            # Join parts and add extension
+            base_filename = '_'.join(filename_parts)
+            
+            # Ensure filename is not too long (max 255 chars for most filesystems)
+            max_base_length = 240  # Leave room for .dcm extension and potential numbering
+            if len(base_filename) > max_base_length:
+                base_filename = base_filename[:max_base_length]
+            
+            filename = f"{base_filename}.dcm"
+            file_path = os.path.join(output_directory, filename)
+            
+            # Handle filename conflicts by adding a number suffix
+            counter = 1
+            original_file_path = file_path
+            while os.path.exists(file_path):
+                base_name = base_filename
+                if len(base_name) > max_base_length - 10:  # Leave room for counter
+                    base_name = base_name[:max_base_length - 10]
+                filename = f"{base_name}_{counter:03d}.dcm"
+                file_path = os.path.join(output_directory, filename)
+                counter += 1
+            
+            # Save the dataset
+            try:
+                dataset.save_as(file_path, write_like_original=False)
+                file_size = os.path.getsize(file_path)
+                retrieved_files.append({
+                    "file_path": file_path,
+                    "sop_instance_uid": sop_instance,
+                    "size_bytes": file_size
+                })
+                nonlocal total_size_bytes
+                total_size_bytes += file_size
+            except Exception as e:
+                print(f"Error saving DICOM file {filename}: {str(e)}")
+                return 0xA700  # Failure - Out of Resources
+            
+            return 0x0000  # Success
+        
+        # Set up event handlers
+        handlers = [(evt.EVT_C_STORE, handle_store)]
+        
+        # Add role negotiation for common storage SOP classes
+        from pynetdicom.sop_class import (
+            CTImageStorage, MRImageStorage, ComputedRadiographyImageStorage,
+            DigitalXRayImageStorageForPresentation, DigitalXRayImageStorageForProcessing,
+            UltrasoundImageStorage, SecondaryCaptureImageStorage
+        )
+        
+        # Define common storage SOP classes that we might receive
+        storage_classes = [
+            CTImageStorage, MRImageStorage, ComputedRadiographyImageStorage,
+            DigitalXRayImageStorageForPresentation, DigitalXRayImageStorageForProcessing,
+            UltrasoundImageStorage, SecondaryCaptureImageStorage, EncapsulatedPDFStorage
+        ]
+        
+        # Build role negotiations
+        roles = [build_role(sop_class, scp_role=True) for sop_class in storage_classes]
+        
+        # Associate with the DICOM node
+        assoc = self.ae.associate(
+            self.host,
+            self.port,
+            ae_title=self.called_aet,
+            evt_handlers=handlers,
+            ext_neg=roles
+        )
+        
+        if not assoc.is_established:
+            return {
+                "success": False,
+                "message": f"Failed to associate with DICOM node at {self.host}:{self.port}",
+                "output_directory": output_directory,
+                "files_retrieved": [],
+                "total_files": 0,
+                "total_size_mb": 0.0
+            }
+        
+        success = False
+        message = "C-GET operation failed"
+        
+        try:
+            # Send C-GET request
+            responses = assoc.send_c_get(ds, PatientRootQueryRetrieveInformationModelGet)
+            
+            for (status, dataset) in responses:
+                if status:
+                    status_int = status.Status if hasattr(status, 'Status') else 0
+                    
+                    if status_int == 0x0000:  # Success
+                        success = True
+                        message = "C-GET operation completed successfully"
+                    elif status_int == 0xFF00:  # Pending
+                        success = True  # Still processing
+                        message = "C-GET operation in progress"
+                    elif status_int == 0xA701:  # Refused: Out of Resources - Unable to calculate number of matches
+                        message = "C-GET refused: Unable to calculate number of matches"
+                    elif status_int == 0xA702:  # Refused: Out of Resources - Unable to perform sub-operations
+                        message = "C-GET refused: Unable to perform sub-operations"
+                    elif status_int == 0xFE00:  # Cancel
+                        message = "C-GET operation was cancelled"
+                    else:
+                        message = f"C-GET failed with status 0x{status_int:04X}"
+        
+        finally:
+            # Always release the association
+            assoc.release()
+        
+        # Calculate total size in MB
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        
+        # Create final result
+        result = {
+            "success": success,
+            "message": message,
+            "output_directory": output_directory,
+            "files_retrieved": [f["file_path"] for f in retrieved_files],
+            "total_files": len(retrieved_files),
+            "total_size_mb": round(total_size_mb, 2)
+        }
+        
+        # Add detailed file information if successful
+        if success and retrieved_files:
+            result["file_details"] = retrieved_files
+            result["message"] = f"Successfully retrieved {len(retrieved_files)} DICOM files ({total_size_mb:.2f} MB)"
+        
+        return result
+    
     @staticmethod
     def _dataset_to_dict(dataset: Dataset) -> Dict[str, Any]:
         """Convert a DICOM dataset to a dictionary.

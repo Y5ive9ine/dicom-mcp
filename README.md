@@ -9,8 +9,8 @@ The `dicom-mcp` server enables AI assistants to query, read, and move data on DI
 <div align="center">
 
 🤝 **[Contribute](#contributing)** •
-📝 **[Report Bug](https://github.com/ChristianHinge/dicom-mcp/issues)**  •
-📝 **[Blog Post 1](https://www.christianhinge.com/projects/dicom-mcp/)** 
+📝 **[Report Bug](https://github.com/kain/dicom-mcp/issues)**  •
+📝 **[Documentation](https://github.com/kain/dicom-mcp/wiki)** 
 
 </div>
 
@@ -40,6 +40,7 @@ The `dicom-mcp` server enables AI assistants to query, read, and move data on DI
 
 * **🔍 Query Metadata**: Search for patients, studies, series, and instances using various criteria.
 * **📄 Read DICOM Reports (PDF)**: Retrieve DICOM instances containing encapsulated PDFs (e.g., clinical reports) and extract the text content.
+* **📥 Download DICOM Files**: Download DICOM instances from the server to a local directory using C-GET. Retrieve entire series or specific instances for local analysis and processing.
 * **➡️ Send DICOM Images**: Send series or studies to other DICOM destinations, e.g. AI endpoints for image segmentation, classification, etc.
 * **⚙️ Utilities**: Manage connections and understand query options.
 
@@ -54,7 +55,7 @@ Or by cloning the repository:
 
 ```bash
 # Clone and set up development environment
-git clone https://github.com/ChristianHinge/dicom-mcp
+git clone https://github.com/kain/dicom-mcp
 cd dicom mcp
 
 # Create and activate virtual environment
@@ -146,6 +147,10 @@ For development:
 
 * **`extract_pdf_text_from_dicom`**: Retrieve a specific DICOM instance containing an encapsulated PDF and extract its text content.
 
+### 📥 Download DICOM Files
+
+* **`retrieve_dicom_instances`**: Download DICOM instances from the server to a local directory using C-GET. Retrieve entire series or specific instances for local analysis and processing.
+
 ### ➡️ Send DICOM Images
 
 * **`move_series`**: Send a specific DICOM series to another configured DICOM node using C-MOVE.
@@ -205,3 +210,56 @@ npx @modelcontextprotocol/inspector uv run dicom-mcp /path/to/your_config.yaml -
 
 * Built using [pynetdicom](https://github.com/pydicom/pynetdicom)
 * Uses [PyPDF2](https://pypi.org/project/PyPDF2/) for PDF text extraction
+
+## Usage Examples
+
+### Basic Patient Query
+```python
+# Find all patients with name starting with "SMITH"
+patients = query_patients(name_pattern="SMITH*")
+```
+
+### Study Query with Date Range
+```python
+# Find CT studies from January 2023
+studies = query_studies(
+    modality_in_study="CT", 
+    study_date="20230101-20230131"
+)
+```
+
+### Download DICOM Files
+```python
+# Download entire series to local directory
+result = retrieve_dicom_instances(
+    series_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.2005",
+    output_directory="/path/to/local/dicom/files"
+)
+
+# Download specific instance only
+result = retrieve_dicom_instances(
+    series_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.2005",
+    sop_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.3001",
+    output_directory="/path/to/local/dicom/files"
+)
+
+print(f"Downloaded {result['total_files']} files ({result['total_size_mb']} MB)")
+print(f"Files saved to: {result['output_directory']}")
+
+# Files will be named with meaningful information like:
+# "12345_SMITH_20230215_CT_CHEST_AXIAL_Inst001.dcm"
+# "12345_SMITH_20230215_CT_CHEST_AXIAL_Inst002.dcm"
+```
+
+### Extract PDF Reports
+```python
+# Extract text from a DICOM PDF report
+result = extract_pdf_text_from_dicom(
+    study_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.1009",
+    series_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.2005", 
+    sop_instance_uid="1.2.840.113619.2.1.1.322.1600364094.412.3001"
+)
+
+if result["success"]:
+    print("Report text:", result["text_content"])
+```

@@ -9,7 +9,7 @@ def test_move_series(dicom_client):
     # Make sure we have test data  
       
     # First query to get a series UID
-    studies = dicom_client.query_study(patient_id="Anon001")
+    studies = dicom_client.query_study(patient_id="TEST123")
     assert len(studies) > 0
     
     study_uid = studies[0]["StudyInstanceUID"]
@@ -22,7 +22,7 @@ def test_move_series(dicom_client):
     # Attempt to move the series to the same Orthanc server (self-move)
     # In a real scenario, you would move to a different destination
     result = dicom_client.move_series(
-        destination_ae="MONAI-DEPLOY",
+        destination_ae="STORESCP",
         series_instance_uid=series_uid
     )
     
