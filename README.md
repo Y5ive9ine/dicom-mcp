@@ -9,8 +9,7 @@ The `dicom-mcp` server enables AI assistants to query, read, and move data on DI
 <div align="center">
 
 🤝 **[Contribute](#contributing)** •
-📝 **[Report Bug](https://github.com/kain/dicom-mcp/issues)**  •
-📝 **[Documentation](https://github.com/kain/dicom-mcp/wiki)** 
+📝 **[Report Bug](https://github.com/Y5ive9ine/dicom-mcp/issues)**  •
 
 </div>
 
@@ -55,7 +54,7 @@ Or by cloning the repository:
 
 ```bash
 # Clone and set up development environment
-git clone https://github.com/kain/dicom-mcp
+git clone https://github.com/Y5ive9ine/dicom-mcp
 cd dicom mcp
 
 # Create and activate virtual environment
